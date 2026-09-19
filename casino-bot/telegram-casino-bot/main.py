@@ -3484,29 +3484,59 @@ def add_house_balance(amount):
     """Add USD amount to house balance and save."""
     global crypto_house_balances, house_balance, casino_balance_usd
     if _uses_coin_wallet_context():
-        return
-    house_balance += amount
-    casino_balance_usd = house_balance
-    crypto_house_balances['USDT'] = house_balance
+        return False
     try:
-        save_data_critical()
-    except Exception as e:
-        logger.error(f"add_house_balance save_data_critical error: {e}")
-    logger.info(f"🏠 House +${amount:.2f} USDT. New house: ${house_balance:.2f}")
+        amount = float(amount)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(amount) or amount <= 0:
+        return False
+
+    def _add():
+        global house_balance, casino_balance_usd
+        house_balance += amount
+        casino_balance_usd = house_balance
+        crypto_house_balances['USDT'] = house_balance
+        try:
+            save_data_critical()
+        except Exception as e:
+            logger.error(f"add_house_balance save_data_critical error: {e}")
+        logger.info(f"🏠 House +${amount:.2f} USDT. New house: ${house_balance:.2f}")
+        return True
+
+    return protected_balance_operation(_add)
 
 def deduct_house_balance(amount):
     """Deduct USD amount from house balance and save."""
     global crypto_house_balances, house_balance, casino_balance_usd
     if _uses_coin_wallet_context():
-        return
-    house_balance -= amount
-    casino_balance_usd = house_balance
-    crypto_house_balances['USDT'] = house_balance
+        return False
     try:
-        save_data_critical()
-    except Exception as e:
-        logger.error(f"deduct_house_balance save_data_critical error: {e}")
-    logger.info(f"🏠 House -${amount:.2f} USDT. New house: ${house_balance:.2f}")
+        amount = float(amount)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(amount) or amount <= 0:
+        return False
+
+    def _deduct():
+        global house_balance, casino_balance_usd
+        if house_balance < amount:
+            logger.warning(
+                f"🚫 House balance debit rejected: has ${house_balance:.4f}, "
+                f"needs ${amount:.4f}"
+            )
+            return False
+        house_balance -= amount
+        casino_balance_usd = house_balance
+        crypto_house_balances['USDT'] = house_balance
+        try:
+            save_data_critical()
+        except Exception as e:
+            logger.error(f"deduct_house_balance save_data_critical error: {e}")
+        logger.info(f"🏠 House -${amount:.2f} USDT. New house: ${house_balance:.2f}")
+        return True
+
+    return protected_balance_operation(_deduct)
 dealer_queue = []  # Kept for compatibility with older diagnostics.
 dealer_busy = {'dealer_1': False, 'dealer_2': False, 'dealer_3': False}
 # Assignments are request-scoped, never user-scoped. A user can have more than
@@ -3862,6 +3892,7 @@ user_net_profit = {}  # Track net profit (wins - bets) for dynamic rigging
 rakeback_claimed_totals = {} # Track total rakeback claimed by users
 # Crypto house balances - stores balance for each cryptocurrency
 crypto_house_balances = {'USDT': 1022.0}  # House balance in USDT
+house_balance = crypto_house_balances['USDT']
 # User crypto balances - separate from USDT balance
 user_crypto_balances = {}  # Format: {user_id: {'USDT': 100.0, 'BTC': 0.5}}
 # User crypto deposits tracking
@@ -3940,8 +3971,8 @@ AVAILABLE_EMOJIS = [
     '💡', '🔋', '🔌', '🧲', '⚙️', '🔑', '🗝️', '🔐', '🚀', '🛸',
 ]
 
-# Casino balance in USD (starts at $600)
-casino_balance_usd = INITIAL_CASINO_BALANCE_USD
+# Casino balance in USD mirrors the initial USDT house ledger.
+casino_balance_usd = house_balance
 
 # Coinflip sticker storage
 coinflip_stickers = {
@@ -4432,6 +4463,7 @@ NOWPAYMENTS_2FA_SECRET = os.getenv("TOTP_SECRET")
 
 # ── Plisio Withdrawal API ─────────────────────────────────────────────────────
 PLISIO_SECRET_KEY = os.getenv("PLISIO_SECRET_KEY", "")
+USE_SANDBOX = os.getenv("USE_SANDBOX", "").strip().lower() in {"1", "true", "yes", "on"}
 
 # Log Configuration Status (for debugging)
 logger.info(f"NOWPayments Config: API_KEY={'SET' if NOWPAYMENTS_API_KEY else 'MISSING'}, IPN_SECRET={'SET' if NOWPAYMENTS_IPN_SECRET else 'MISSING'}")
@@ -6962,6 +6994,24 @@ def convert_usd_to_currency(amount_usd: float, currency: str) -> float:
     rate = CURRENCY_RATES.get(currency, 1.0)
     return float(amount_float * rate)
 
+def convert_crypto_to_usd(currency: str, crypto_amount: float) -> float:
+    """Convert a crypto amount into the internal USD balance unit."""
+    try:
+        amount = float(crypto_amount)
+    except (TypeError, ValueError):
+        return 0.0
+    rate = _resolve_deposit_rate(str(currency).upper())
+    return amount * rate if rate > 0 else 0.0
+
+def convert_usd_to_crypto(currency: str, amount_usd: float) -> float:
+    """Convert an internal USD amount into the requested crypto unit."""
+    try:
+        amount = float(amount_usd)
+    except (TypeError, ValueError):
+        return 0.0
+    rate = _resolve_deposit_rate(str(currency).upper())
+    return amount / rate if rate > 0 else 0.0
+
 def format_balance_in_currency(amount_usd: float, currency: str) -> str:
     """Format balance in user's preferred currency with symbol. Input is in USD."""
     if _uses_coin_wallet_context():
@@ -7137,7 +7187,14 @@ def is_user_deposited(user_id: str) -> bool:
 def set_user_balance(user_id: str, amount_usd: float):
     """Set user balance in USDT."""
     user_id = str(user_id)
-    user_balances[user_id] = amount_usd
+    amount_usd = float(amount_usd)
+    if not math.isfinite(amount_usd) or amount_usd < 0:
+        raise ValueError("Balance cannot be negative or non-finite")
+
+    def _set():
+        user_balances[user_id] = round(amount_usd, 8)
+
+    protected_balance_operation(_set)
     save_data_critical()
 
 def get_display_balance(user_id: str) -> str:
@@ -7636,6 +7693,35 @@ def ultra_secure_crypto_operation(operation_type: str, crypto: str, amount: floa
 
     return protected_balance_operation(_crypto_operation)
 
+def get_crypto_house_balance(currency: str) -> float:
+    """Return the available house balance for a crypto currency."""
+    return max(0.0, float(crypto_house_balances.get(str(currency).upper(), 0.0) or 0.0))
+
+def add_crypto_house_balance(currency: str, amount: float) -> bool:
+    """Atomically credit the house's crypto inventory."""
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        return False
+    if amount <= 0:
+        return False
+    result = ultra_secure_crypto_operation("add_house", str(currency).upper(), amount)
+    save_data_critical()
+    return result == amount
+
+def deduct_crypto_house_balance(currency: str, amount: float) -> bool:
+    """Atomically reserve crypto from the house inventory without overdrawing."""
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        return False
+    if amount <= 0:
+        return False
+    result = ultra_secure_crypto_operation("deduct_house", str(currency).upper(), amount)
+    if result:
+        save_data_critical()
+    return bool(result)
+
 def handle_crypto_game_win(user_id: str, bet_amount: float, win_amount: float):
     """Handle crypto house balance when user wins a game."""
     user_id = str(user_id)
@@ -7973,6 +8059,11 @@ async def process_crypto_deposit(deposit_data: dict):
 
 def create_crypto_withdrawal(user_id: str, currency: str, amount_usd: float, withdrawal_address: str) -> dict:
     """Create a cryptocurrency withdrawal."""
+    user_id = str(user_id)
+    amount_usd = float(amount_usd)
+    currency = str(currency).upper()
+    user_reserved = False
+    house_reserved = False
     try:
         # Check if user can withdraw
         can_withdraw_check, message = can_withdraw(user_id, amount_usd)
@@ -7985,6 +8076,21 @@ def create_crypto_withdrawal(user_id: str, currency: str, amount_usd: float, wit
         # Check if house has enough crypto
         if get_crypto_house_balance(currency) < crypto_amount:
             return {"success": False, "error": f"Insufficient {currency} in house balance"}
+
+        # Reserve both sides before calling the external payout provider.  The
+        # old path sent the payout first, ignored a failed user debit, and then
+        # called missing crypto-house helpers; a provider success could
+        # therefore become a free withdrawal or leave the user's balance
+        # deducted on a failed request.
+        if not ultra_secure_deduct_user_balance(user_id, amount_usd, "withdrawal"):
+            return {"success": False, "error": "Insufficient user balance"}
+        user_reserved = True
+        if not deduct_crypto_house_balance(currency, crypto_amount):
+            ultra_secure_add_user_balance(user_id, amount_usd, "withdrawal_reservation_refund")
+            user_reserved = False
+            return {"success": False, "error": f"Insufficient {currency} in house balance"}
+
+        house_reserved = True
 
         # Create withdrawal order
         withdrawal_order = {
@@ -8020,10 +8126,6 @@ def create_crypto_withdrawal(user_id: str, currency: str, amount_usd: float, wit
             )
 
         if payout_result and "id" in payout_result:
-            # Deduct from user balance and house balance
-            deduct_user_balance(user_id, amount_usd)
-            deduct_crypto_house_balance(currency, crypto_amount)
-
             withdrawal_info = payout_result["withdrawals"][0] if "withdrawals" in payout_result else {}
 
             save_data_critical()
@@ -8039,9 +8141,19 @@ def create_crypto_withdrawal(user_id: str, currency: str, amount_usd: float, wit
                 "address": withdrawal_address
             }
         else:
+            if house_reserved:
+                add_crypto_house_balance(currency, crypto_amount)
+                house_reserved = False
+            if user_reserved:
+                ultra_secure_add_user_balance(user_id, amount_usd, "withdrawal_reservation_refund")
+                user_reserved = False
             return {"success": False, "error": "Failed to create withdrawal"}
 
     except Exception as e:
+        if house_reserved:
+            add_crypto_house_balance(currency, crypto_amount)
+        if user_reserved:
+            ultra_secure_add_user_balance(user_id, amount_usd, "withdrawal_reservation_refund")
         logger.error(f"Error creating crypto withdrawal: {e}")
         return {"success": False, "error": str(e)}
 
@@ -11135,33 +11247,37 @@ async def accepttransfer_command(update: Update, context: ContextTypes.DEFAULT_T
 
         # Consume the code immediately so a duplicate claim can never see it again.
         user_transfer_codes.pop(code, None)
-        save_data_critical()
 
         # ── Move everything from source → target ──────────────────────────
-        source_balance = get_user_balance(source_uid)
-        user_balances[target_uid] = source_balance
-        user_balances[source_uid] = 0.0
+        # Keep the account move under the same lock used by all balance
+        # primitives so a concurrent bet/credit cannot be overwritten.
+        def _move_account():
+            source_balance = get_user_balance(source_uid)
+            user_balances[target_uid] = source_balance
+            user_balances[source_uid] = 0.0
 
-        user_wagering_totals[target_uid] = user_wagering_totals.get(source_uid, 0.0)
-        user_wagered_amount[target_uid]  = user_wagered_amount.get(source_uid, 0.0)
-        user_match_history[target_uid]   = user_match_history.get(source_uid, [])
-        user_wagering_requirements[target_uid] = user_wagering_requirements.get(source_uid, 0.0)
+            user_wagering_totals[target_uid] = user_wagering_totals.get(source_uid, 0.0)
+            user_wagered_amount[target_uid]  = user_wagered_amount.get(source_uid, 0.0)
+            user_match_history[target_uid]   = user_match_history.get(source_uid, [])
+            user_wagering_requirements[target_uid] = user_wagering_requirements.get(source_uid, 0.0)
 
-        src_profile = user_profiles.get(source_uid, {})
-        tgt_profile = user_profiles.setdefault(target_uid, {})
-        for fld in ('lt_games', 'lt_wins', 'lt_won', 'lt_wagered', 'lt_first_game_ts', 'lt_last_game_ts'):
-            if fld in src_profile:
-                tgt_profile[fld] = src_profile[fld]
+            src_profile = user_profiles.get(source_uid, {})
+            tgt_profile = user_profiles.setdefault(target_uid, {})
+            for fld in ('lt_games', 'lt_wins', 'lt_won', 'lt_wagered', 'lt_first_game_ts', 'lt_last_game_ts'):
+                if fld in src_profile:
+                    tgt_profile[fld] = src_profile[fld]
 
-        # Wipe the source account so it can't be reused
-        user_wagering_totals[source_uid] = 0.0
-        user_wagered_amount[source_uid]  = 0.0
-        user_match_history[source_uid]   = []
-        user_wagering_requirements[source_uid] = 0.0
-        for fld in ('lt_games', 'lt_wins', 'lt_won', 'lt_wagered', 'lt_first_game_ts', 'lt_last_game_ts'):
-            src_profile.pop(fld, None)
+            # Wipe the source account so it can't be reused
+            user_wagering_totals[source_uid] = 0.0
+            user_wagered_amount[source_uid]  = 0.0
+            user_match_history[source_uid]   = []
+            user_wagering_requirements[source_uid] = 0.0
+            for fld in ('lt_games', 'lt_wins', 'lt_won', 'lt_wagered', 'lt_first_game_ts', 'lt_last_game_ts'):
+                src_profile.pop(fld, None)
 
-        save_data_critical()
+            save_data_critical()
+
+        protected_balance_operation(_move_account)
 
     target_currency = get_user_currency(target_uid)
     await update.message.reply_text(
@@ -16037,55 +16153,45 @@ async def tip_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     sender_currency = tip_data['sender_currency']
     recipient_display = tip_data['recipient_display']
 
-    # Re-check balance (race condition guard)
+    # Move the two balances in one critical section.  The previous
+    # debit-then-credit sequence persisted an intermediate state, so a
+    # restart between those steps could permanently lose the tip.
     sender_balance_before = get_user_balance(sender_id)
-    if sender_balance_before < tip_amount_usd:
-        await query.edit_message_text("❌ Insufficient balance. Tip cancelled.")
-        return
+    transfer_result = {"ok": False, "sender_after": sender_balance_before, "recipient_after": 0.0}
 
-    # STEP 1: Deduct from sender.
-    # Tips are player-to-player transfers — they must NEVER be blocked by
-    # the active-game guard or the bet-debounce in deduct_user_balance.
-    # Call ultra_secure_deduct_user_balance directly with type "tip" so
-    # neither the game-block nor the 3-second debounce applies.
-    deducted = ultra_secure_deduct_user_balance(sender_id, tip_amount_usd, "tip")
-    if not deducted:
-        await query.edit_message_text("❌ Could not process tip — insufficient balance.")
-        return
-    # Flush sender deduction to disk immediately — prevents balance reappearing
-    # if the bot crashes before the recipient credit + full save below.
-    save_data_critical()
-
-    # STEP 2: Add to recipient — NO wagering requirement.
-    # Tips are player-to-player transfers and must hit the wallet fully and instantly.
-    try:
-        # Ensure recipient exists in user_profiles so /bal and /profile work
+    def _transfer_tip():
+        current_sender = float(user_balances.get(sender_id, 0.0))
+        if current_sender < tip_amount_usd:
+            return
+        current_recipient = float(user_balances.get(recipient_id, 0.0))
+        user_balances[sender_id] = round(current_sender - tip_amount_usd, 8)
+        user_balances[recipient_id] = round(current_recipient + tip_amount_usd, 8)
         if recipient_id not in user_profiles:
             user_profiles[recipient_id] = {
                 'first_name': tip_data.get('recipient_display', 'Player'),
                 'username': '',
                 'joined': int(time.time()),
             }
-        if recipient_id not in user_balances:
-            user_balances[recipient_id] = 0.0
-
-        # Directly credit recipient balance using ultra-secure system
-        ultra_secure_add_user_balance(recipient_id, tip_amount_usd, "tip_credit")
-        # Mark recipient as having received a tip (triggers withdrawal restrictions)
         user_tip_received[recipient_id] = True
-        # Force synchronous disk save so balance is never lost
+        log_transaction("tip", sender_id, -tip_amount_usd,
+                        {"recipient": recipient_id, "pre_balance": current_sender})
+        log_transaction("tip_credit", recipient_id, tip_amount_usd,
+                        {"sender": sender_id, "pre_balance": current_recipient})
         save_data_critical()
-    except Exception as e:
-        # If adding fails, refund sender immediately
-        logger.error(f"Tip credit failed for {recipient_id}: {e} — refunding sender {sender_id}")
-        ultra_secure_add_user_balance(sender_id, tip_amount_usd, "tip_refund")
-        save_data_critical()
-        await query.edit_message_text("❌ Tip failed due to an error. Your balance has been refunded.")
+        transfer_result.update({
+            "ok": True,
+            "sender_after": user_balances[sender_id],
+            "recipient_after": user_balances[recipient_id],
+        })
+
+    protected_balance_operation(_transfer_tip)
+    if not transfer_result["ok"]:
+        await query.edit_message_text("❌ Could not process tip — insufficient balance.")
         return
 
     # Log balances after transfer for audit trail
-    sender_balance_after = get_user_balance(sender_id)
-    recipient_balance_after = get_user_balance(recipient_id)
+    sender_balance_after = transfer_result["sender_after"]
+    recipient_balance_after = transfer_result["recipient_after"]
     logger.info(
         f"✅ TIP TRANSFER: {sender_id} → {recipient_id} | "
         f"Amount: {tip_amount_usd:.2f} | "
@@ -21315,7 +21421,7 @@ async def dice_range_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not update.message or not update.message.from_user:
         return
 
-    global crypto_house_balances
+    global crypto_house_balances, house_balance, casino_balance_usd
     user_id = str(update.message.from_user.id)
     user_currency = get_user_currency(user_id)
     balance = get_user_balance(user_id)
@@ -32942,6 +33048,9 @@ async def setbal_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         target_id = str(context.args[0])
         amount = float(context.args[1])
         admin_id = str(update.message.from_user.id)
+        if not math.isfinite(amount) or amount < 0:
+            await update.message.reply_text("❌ Amount cannot be negative.")
+            return
 
         import uuid as _uuid
         key = f"adminbal_{admin_id}_{_uuid.uuid4().hex[:8]}"
@@ -33157,8 +33266,7 @@ async def handle_admin_addbal_type(update: Update, context: ContextTypes.DEFAULT
     try:
         # Apply the balance change
         if op == 'set':
-            user_balances[target_id] = amount
-            _flush_balances_backup()
+            set_user_balance(target_id, amount)
             user_bonus_balances.pop(target_id, None)
             user_wagering_requirements.pop(target_id, None)
             if _OPS_OK:
@@ -33990,8 +34098,7 @@ async def resetbal_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     target_id = context.args[0]
     old_balance = get_user_balance(target_id)
-    user_balances[target_id] = 0.0
-    save_data_critical()
+    set_user_balance(target_id, 0.0)
     
     await update.message.reply_text(
         f"✅ <b>BALANCE RESET</b>\n\n"
@@ -35443,10 +35550,34 @@ async def add_balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text(f"❌ Insufficient house balance. Available: USDT {usdt_house:.2f}")
             return
 
-        # Transfer from house to user
-        ultra_secure_add_user_balance(target_user_id, amount_usdt, "admin_addbalance_usdt")
-        crypto_house_balances['USDT'] = usdt_house - amount_usdt
-        save_data_critical()
+        transfer_result = {"ok": False}
+
+        def _transfer_house_balance():
+            global house_balance, casino_balance_usd
+            current_house = float(crypto_house_balances.get('USDT', 0.0) or 0.0)
+            if current_house < amount_usdt:
+                return
+            current_user = float(user_balances.get(target_user_id, 0.0) or 0.0)
+            crypto_house_balances['USDT'] = round(current_house - amount_usdt, 8)
+            house_balance = crypto_house_balances['USDT']
+            casino_balance_usd = house_balance
+            user_balances[target_user_id] = round(current_user + amount_usdt, 8)
+            log_transaction(
+                "admin_addbalance_usdt",
+                target_user_id,
+                amount_usdt,
+                {"house_pre_balance": current_house, "user_pre_balance": current_user},
+            )
+            save_data_critical()
+            transfer_result["ok"] = True
+
+        protected_balance_operation(_transfer_house_balance)
+        if not transfer_result["ok"]:
+            await update.message.reply_text(
+                f"❌ Insufficient house balance. Available: USDT "
+                f"{crypto_house_balances.get('USDT', 0.0):.2f}"
+            )
+            return
 
         # Get user's preferred currency for display
         target_currency = get_user_currency(target_user_id)

@@ -1,1 +1,2 @@
 - [Deposit notification invariants](deposit-notification-invariants.md) — preserve gross USD through settlement; derive fee-adjusted credit only in the renderer.
+- [Balance mutation boundaries](balance-mutation-boundaries.md) — reserve both sides of external payouts and keep multi-account transfers under the shared balance lock.
