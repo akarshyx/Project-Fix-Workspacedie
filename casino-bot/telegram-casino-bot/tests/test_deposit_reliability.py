@@ -491,9 +491,44 @@ class DepositReliabilityTests(unittest.TestCase):
             self.assertIn("Stars received:</b> <b>50</b>", text)
             self.assertIn("USDT value:</b> <b>$0.60</b>", text)
             self.assertIn("Credited:</b> <b>$0.60</b>", text)
-            self.assertIn("@player4555", text)
+            self.assertIn(">player4555</a>", text)
+            self.assertNotIn("@player4555", text)
             self.assertIn("Good luck at Rollers Casino!", text)
             self.assertNotIn("Txid-", text)
+
+    def test_telegram_gift_confirmation_uses_name_when_username_is_missing(self):
+        class FakeResponse:
+            status_code = 200
+            text = ""
+
+        posted = []
+
+        def fake_post(_url, json=None, **_kwargs):
+            posted.append(json or {})
+            return FakeResponse()
+
+        with patch.dict(main.os.environ, {"TELEGRAM_BOT_TOKEN": "test-token"}, clear=False), \
+             patch.object(main.requests, "post", side_effect=fake_post), \
+             patch.object(
+                 main,
+                 "user_profiles",
+                 {"123456": {"username": "", "first_name": "Player", "last_name": "4555"}},
+             ), \
+             patch.object(main, "CASINO_GROUP_CHAT_ID", None):
+            self.assertTrue(
+                main._tg_send_deposit_notification(
+                    "123456",
+                    0.18,
+                    "TELEGRAM_GIFT",
+                    coin_amount=15,
+                    fee_amount=0.0,
+                )
+            )
+
+        self.assertEqual(len(posted), 2)
+        for payload in posted:
+            self.assertIn(">Player 4555</a>", payload["text"])
+            self.assertNotIn("@Player 4555", payload["text"])
 
     def test_nowpayments_network_currency_alias_is_normalized_for_chain_scan(self):
         self.assertEqual(

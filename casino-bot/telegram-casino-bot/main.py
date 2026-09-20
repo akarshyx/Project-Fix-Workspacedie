@@ -1686,15 +1686,28 @@ def _tg_send_deposit_notification(
             profile = user_profiles.get(str(user_id), {})
             profile_username = profile.get("username", "") if isinstance(profile, dict) else ""
             raw_username = str(username or profile_username or "").strip().lstrip("@")
+            profile_name = ""
+            if isinstance(profile, dict):
+                profile_name = " ".join(
+                    str(profile.get(field, "") or "").strip()
+                    for field in ("first_name", "last_name")
+                    if str(profile.get(field, "") or "").strip()
+                )
+                profile_name = (
+                    profile_name
+                    or str(profile.get("full_name", "") or "").strip()
+                    or str(profile.get("name", "") or "").strip()
+                )
+            display_name = profile_name or "Player"
             if raw_username:
                 player_label = (
                     f'<a href="tg://user?id={_html.escape(str(user_id), quote=True)}">'
-                    f'@{_html.escape(raw_username)}</a>'
+                    f'{_html.escape(raw_username)}</a>'
                 )
             else:
                 player_label = (
                     f'<a href="tg://user?id={_html.escape(str(user_id), quote=True)}">'
-                    "Player</a>"
+                    f'{_html.escape(display_name)}</a>'
                 )
             stars_display = f"{max(0, int(round(_safe_float(coin_amount)))):,}"
             dm_text = (
@@ -28812,6 +28825,8 @@ def _gift_snapshot(owned_gift) -> dict:
         "usd": round(stars * TELEGRAM_GIFT_USD_PER_STAR, 2),
         "sender_id": str(getattr(sender, "id", "")) if sender else "",
         "sender_username": getattr(sender, "username", "") if sender else "",
+        "sender_first_name": getattr(sender, "first_name", "") if sender else "",
+        "sender_last_name": getattr(sender, "last_name", "") if sender else "",
         "send_date": send_date.isoformat() if hasattr(send_date, "isoformat") else str(send_date or ""),
     }
 
@@ -28911,6 +28926,13 @@ async def _credit_telegram_gift(user_id: str, gift_key: str, snapshot: dict) -> 
         if gift_key in processed_telegram_gifts:
             return False
         processed_telegram_gifts.add(gift_key)
+    profile = user_profiles.setdefault(str(user_id), {})
+    if not profile.get("username") and snapshot.get("sender_username"):
+        profile["username"] = snapshot["sender_username"]
+    if not profile.get("first_name") and snapshot.get("sender_first_name"):
+        profile["first_name"] = snapshot["sender_first_name"]
+    if not profile.get("last_name") and snapshot.get("sender_last_name"):
+        profile["last_name"] = snapshot["sender_last_name"]
     credited_usd = float(snapshot["stars"]) * TELEGRAM_GIFT_USD_PER_STAR
     processed = _process_confirmed_deposit(
         user_id=str(user_id),
@@ -28942,6 +28964,8 @@ async def handle_telegram_gift_message(update: Update, context: ContextTypes.DEF
         "usd": round(_gift_current_star_value(gift_info) * TELEGRAM_GIFT_USD_PER_STAR, 2),
         "sender_id": str(sender.id),
         "sender_username": sender.username or "",
+        "sender_first_name": sender.first_name or "",
+        "sender_last_name": sender.last_name or "",
         "send_date": str(getattr(message, "date", "") or ""),
     }
     gift_key = f"message:{message.chat_id}:{message.message_id}"
