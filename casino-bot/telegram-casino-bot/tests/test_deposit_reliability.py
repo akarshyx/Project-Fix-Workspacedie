@@ -407,9 +407,12 @@ class DepositReliabilityTests(unittest.TestCase):
         processing_text = posted[0]["text"]
         confirmation_text = posted[1]["text"]
         self.assertIn("0.3572 GRAM", processing_text)
-        self.assertIn('emoji-id="5386367538735104399"', processing_text)
         self.assertIn('emoji-id="6235568867637207626"', processing_text)
-        self.assertIn("https://tonviewer.com/transaction/gram-tx-123", processing_text)
+        self.assertEqual(
+            processing_text,
+            '<tg-emoji emoji-id="6235568867637207626">🌀</tg-emoji> '
+            '<b>Processing payment Of 0.3572 GRAM</b>',
+        )
         self.assertIn("$20.00", confirmation_text)
         self.assertIn("$19.50", confirmation_text)
         self.assertNotIn("$19.00", confirmation_text)

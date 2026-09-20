@@ -9,8 +9,8 @@ The settlement layer must pass the gross provider USD value to the confirmation 
 
 **How to apply:** Keep gross USD, credited USD, fee USD, coin amount, network, and txid as separate values across provider verification, balance crediting, and notification retry payloads.
 
-The Telegram deposit UX has two distinct user-facing stages: a short button-free processing message when the address first detects a transaction, followed by a separate button-free confirmation after crediting succeeds. Processing must not include balance, Txid, or diagnostic details.
+The Telegram deposit UX has two distinct user-facing stages: a short button-free processing message before the authoritative credit transaction on every verified payment path, followed by a separate button-free confirmation after crediting succeeds. Processing must not include balance, Txid, or diagnostic details.
 
-**Why:** Combining detection and settlement makes users think funds are confirmed before the blockchain/provider confirmation is complete, while verbose diagnostics obscure the status.
+**Why:** Combining detection and settlement makes users think funds are confirmed before the blockchain/provider confirmation is complete, while skipping processing on a direct provider path makes the player miss the intended status update.
 
 **How to apply:** Keep the processing and confirmation notification claims separate and preserve premium custom-emoji formatting without falling back to inline keyboards or diagnostic blocks.

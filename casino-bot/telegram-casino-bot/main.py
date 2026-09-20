@@ -1465,7 +1465,7 @@ DEPOSIT_NOTIFICATION_EMOJI_IDS = {
     # IDs supplied for the Rollers Casino deposit templates. Keep these
     # explicit so a temporary sticker-pack lookup failure cannot downgrade
     # deposit messages to plain Unicode.
-    "processing": "5386367538735104399",
+    "processing": "6235568867637207626",
     "confirmed": "6305056190036451310",
     "txid": "6305518521791028899",
     "balance": "6305442397790674704",
@@ -1668,6 +1668,10 @@ def _tg_send_deposit_notification(
         confirmed_emoji = _deposit_emoji("confirmed", "🔗")
         balance_emoji = _deposit_emoji("balance", "💰")
         txid_emoji = _deposit_emoji("txid", "🔗")
+        credited_usd = max(
+            0.0,
+            _safe_float(usd_amount) - max(0.0, _safe_float(fee_amount)),
+        )
 
         # Compact confirmation copy matching the supplied reference image.
         dm_text = (
@@ -1677,7 +1681,8 @@ def _tg_send_deposit_notification(
             f"<b>Amount :</b> <b>{coin_amount_display}</b>"
             f"</blockquote>\n"
             f"<blockquote>"
-            f"{balance_emoji} <b>IN USD:</b> <b>{usd_amount:.2f}$</b>\n"
+            f"{balance_emoji} <b>IN USD:</b> <b>${usd_amount:.2f}</b>\n"
+            f"<b>Credited:</b> <b>${credited_usd:.2f}</b>\n"
             f"{txid_emoji} <b>Txid-</b> {txid_display}"
             f"</blockquote>"
         )
@@ -8336,15 +8341,12 @@ def _process_confirmed_deposit(
                     f"credited=${credited_amount:.2f} fee=${fee_amount:.2f} "
                     f"currency={pay_currency} source={source} payment_id={payment_id}")
 
-        # 0b. The exact-address monitor owns the first-stage processing
-        # notification. Do not append a late processing message immediately
-        # before confirmation if the monitor never recorded a separate
-        # detection event.
+        # 0b. Send the first-stage processing notification before crediting.
+        # The claim guard makes this safe when the exact-address monitor,
+        # provider poll, and signed IPN race to process the same payment.
         _pending_dep = nowpayments_pending_deposits.get(str(payment_id)) if payment_id else None
         if (
-            isinstance(_pending_dep, dict)
-            and _pending_dep.get("detected_at")
-            and not _pending_dep.get("processing_notified_at")
+            payment_id
             and _claim_deposit_processing_notification(payment_id)
         ):
             _processing_delivered = _tg_send_deposit_processing_notification(
