@@ -457,6 +457,44 @@ class DepositReliabilityTests(unittest.TestCase):
         self.assertEqual(send_confirmation.call_args.args[1], 20.0)
         self.assertEqual(send_confirmation.call_args.kwargs["fee_amount"], 0.5)
 
+    def test_telegram_gift_confirmation_uses_premium_stars_layout(self):
+        class FakeResponse:
+            status_code = 200
+            text = ""
+
+        posted = []
+
+        def fake_post(_url, json=None, **_kwargs):
+            posted.append(json or {})
+            return FakeResponse()
+
+        with patch.dict(main.os.environ, {"TELEGRAM_BOT_TOKEN": "test-token"}, clear=False), \
+             patch.object(main.requests, "post", side_effect=fake_post), \
+             patch.object(main, "user_profiles", {"123456": {"username": "player4555"}}), \
+             patch.object(main, "CASINO_GROUP_CHAT_ID", -100123):
+            self.assertTrue(
+                main._tg_send_deposit_notification(
+                    "123456",
+                    0.60,
+                    "TELEGRAM_GIFT",
+                    coin_amount=50,
+                    fee_amount=0.0,
+                )
+            )
+
+        self.assertEqual(len(posted), 2)
+        for payload in posted:
+            text = payload["text"]
+            self.assertIn("<b>Deposit confirmed</b>", text)
+            self.assertIn('emoji-id="6303251320224622462"', text)
+            self.assertIn('emoji-id="6305280073796689362"', text)
+            self.assertIn("Stars received:</b> <b>50</b>", text)
+            self.assertIn("USDT value:</b> <b>$0.60</b>", text)
+            self.assertIn("Credited:</b> <b>$0.60</b>", text)
+            self.assertIn("@player4555", text)
+            self.assertIn("Good luck at Rollers Casino!", text)
+            self.assertNotIn("Txid-", text)
+
     def test_nowpayments_network_currency_alias_is_normalized_for_chain_scan(self):
         self.assertEqual(
             _normalise_scan_asset(

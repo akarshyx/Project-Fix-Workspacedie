@@ -1673,19 +1673,55 @@ def _tg_send_deposit_notification(
             _safe_float(usd_amount) - max(0.0, _safe_float(fee_amount)),
         )
 
-        # Compact confirmation copy matching the supplied reference image.
-        dm_text = (
-            f"<b>Deposit confirmed</b> {confirmed_emoji}\n\n"
-            f"<blockquote>"
-            f"<b>Currency:</b> <b>{display_symbol}</b> {coin_icon}\n"
-            f"<b>Amount :</b> <b>{coin_amount_display}</b>"
-            f"</blockquote>\n"
-            f"<blockquote>"
-            f"{balance_emoji} <b>IN USD:</b> <b>${usd_amount:.2f}</b>\n"
-            f"<b>Credited:</b> <b>${credited_usd:.2f}</b>\n"
-            f"{txid_emoji} <b>Txid-</b> {txid_display}"
-            f"</blockquote>"
-        )
+        if cur_up == "TELEGRAM_GIFT":
+            # Telegram Gifts have no blockchain txid. Use the same compact,
+            # premium confirmation language while showing the gift's Stars
+            # and its USD value instead of a fake pending transaction.
+            gift_emoji = (
+                f'<tg-emoji emoji-id="{TELEGRAM_GIFT_BUTTON_EMOJI_ID}">🎁</tg-emoji>'
+            )
+            star_emoji = (
+                f'<tg-emoji emoji-id="{TELEGRAM_STAR_BUTTON_EMOJI_ID}">⭐</tg-emoji>'
+            )
+            profile = user_profiles.get(str(user_id), {})
+            profile_username = profile.get("username", "") if isinstance(profile, dict) else ""
+            raw_username = str(username or profile_username or "").strip().lstrip("@")
+            if raw_username:
+                player_label = (
+                    f'<a href="tg://user?id={_html.escape(str(user_id), quote=True)}">'
+                    f'@{_html.escape(raw_username)}</a>'
+                )
+            else:
+                player_label = (
+                    f'<a href="tg://user?id={_html.escape(str(user_id), quote=True)}">'
+                    "Player</a>"
+                )
+            stars_display = f"{max(0, int(round(_safe_float(coin_amount)))):,}"
+            dm_text = (
+                f"<b>Deposit confirmed</b> {confirmed_emoji}\n\n"
+                f"<blockquote>"
+                f"{gift_emoji} <b>Telegram Gift</b>\n"
+                f"{star_emoji} <b>Stars received:</b> <b>{stars_display}</b>\n"
+                f"{balance_emoji} <b>USDT value:</b> <b>${usd_amount:.2f}</b>\n"
+                f"<b>Credited:</b> <b>${credited_usd:.2f}</b>"
+                f"</blockquote>\n\n"
+                f"<b>Player:</b> {player_label}\n\n"
+                f"{gift_emoji} <i>Good luck at Rollers Casino!</i>"
+            )
+        else:
+            # Compact confirmation copy matching the supplied reference image.
+            dm_text = (
+                f"<b>Deposit confirmed</b> {confirmed_emoji}\n\n"
+                f"<blockquote>"
+                f"<b>Currency:</b> <b>{display_symbol}</b> {coin_icon}\n"
+                f"<b>Amount :</b> <b>{coin_amount_display}</b>"
+                f"</blockquote>\n"
+                f"<blockquote>"
+                f"{balance_emoji} <b>IN USD:</b> <b>${usd_amount:.2f}</b>\n"
+                f"<b>Credited:</b> <b>${credited_usd:.2f}</b>\n"
+                f"{txid_emoji} <b>Txid-</b> {txid_display}"
+                f"</blockquote>"
+            )
 
         # Use the same compact copy in the group rather than the old template.
         group_text = dm_text
@@ -28910,10 +28946,10 @@ async def handle_telegram_gift_message(update: Update, context: ContextTypes.DEF
     }
     gift_key = f"message:{message.chat_id}:{message.message_id}"
     if await _credit_telegram_gift(str(sender.id), gift_key, snapshot):
-        await message.reply_text(
-            f"🎁 <b>Gift deposit credited</b>\n\n"
-            f"Current value: <b>{snapshot['stars']:,} Stars (${snapshot['usd']:.2f})</b>",
-            parse_mode=ParseMode.HTML,
+        logger.info(
+            "[GIFTS] Direct gift confirmation sent for user=%s stars=%s",
+            sender.id,
+            snapshot["stars"],
         )
 
 
@@ -28952,17 +28988,11 @@ async def _poll_owner_gifts_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             continue
         if await _credit_telegram_gift(sender_id, key, snapshot):
             unattributed_telegram_gifts.pop(key, None)
-            try:
-                await context.bot.send_message(
-                    chat_id=int(sender_id),
-                    text=(
-                        "🎁 <b>Telegram Gift deposit credited</b>\n\n"
-                        f"Current value: <b>{snapshot['stars']:,} Stars (${snapshot['usd']:.2f})</b>"
-                    ),
-                    parse_mode=ParseMode.HTML,
-                )
-            except Exception:
-                pass
+            logger.info(
+                "[GIFTS] Owner-profile gift confirmation sent for user=%s stars=%s",
+                sender_id,
+                snapshot["stars"],
+            )
     save_data()
 
 

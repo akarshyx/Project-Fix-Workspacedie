@@ -14,3 +14,9 @@ The Telegram deposit UX has two distinct user-facing stages: a short button-free
 **Why:** Combining detection and settlement makes users think funds are confirmed before the blockchain/provider confirmation is complete, while skipping processing on a direct provider path makes the player miss the intended status update.
 
 **How to apply:** Keep the processing and confirmation notification claims separate and preserve premium custom-emoji formatting without falling back to inline keyboards or diagnostic blocks.
+
+Telegram Gift confirmations are non-chain deposits: show the player, gift type, Stars received, USD value, and credited amount with premium emojis, but never show a fake blockchain transaction ID.
+
+**Why:** Gifts settle through Telegram's gift profile rather than a blockchain transaction, so the old generic template exposed internal labels and misleading transaction fields.
+
+**How to apply:** Keep the gift layout separate from crypto confirmation rendering while reusing the same header, quote-block, premium-emoji, and casino closing style.
