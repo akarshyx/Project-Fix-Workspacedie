@@ -1677,11 +1677,13 @@ def _tg_send_deposit_notification(
             # Telegram Gifts have no blockchain txid. Use the same compact,
             # premium confirmation language while showing the gift's Stars
             # and its USD value instead of a fake pending transaction.
+            gift_confirmed_emoji = _deposit_emoji("confirmed", "✦")
+            gift_balance_emoji = _deposit_emoji("balance", "◇")
             gift_emoji = (
-                f'<tg-emoji emoji-id="{TELEGRAM_GIFT_BUTTON_EMOJI_ID}">🎁</tg-emoji>'
+                f'<tg-emoji emoji-id="{TELEGRAM_GIFT_BUTTON_EMOJI_ID}">✦</tg-emoji>'
             )
             star_emoji = (
-                f'<tg-emoji emoji-id="{TELEGRAM_STAR_BUTTON_EMOJI_ID}">⭐</tg-emoji>'
+                f'<tg-emoji emoji-id="{TELEGRAM_STAR_BUTTON_EMOJI_ID}">✧</tg-emoji>'
             )
             profile = user_profiles.get(str(user_id), {})
             profile_username = profile.get("username", "") if isinstance(profile, dict) else ""
@@ -1711,14 +1713,14 @@ def _tg_send_deposit_notification(
                 )
             stars_display = f"{max(0, int(round(_safe_float(coin_amount)))):,}"
             dm_text = (
-                f"<b>Deposit confirmed</b> {confirmed_emoji}\n\n"
+                f"<b>Deposit confirmed</b> {gift_confirmed_emoji}\n\n"
                 f"<blockquote>"
                 f"{gift_emoji} <b>Telegram Gift</b>\n"
                 f"{star_emoji} <b>Stars received:</b> <b>{stars_display}</b>\n"
-                f"{balance_emoji} <b>USDT value:</b> <b>${usd_amount:.2f}</b>\n"
+                f"{gift_balance_emoji} <b>USDT value:</b> <b>${usd_amount:.2f}</b>\n"
                 f"<b>Credited:</b> <b>${credited_usd:.2f}</b>"
                 f"</blockquote>\n\n"
-                f"<b>Player:</b> {player_label}\n\n"
+                f"<blockquote><b>Player:</b> {player_label}</blockquote>\n\n"
                 f"{gift_emoji} <i>Good luck at Rollers Casino!</i>"
             )
         else:
